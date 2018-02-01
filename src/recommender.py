@@ -339,7 +339,6 @@ class RecommendationTask:
 
     @staticmethod
     def call_pgm(payload):
-
         """Calls the PGM model with the normalized manifest information to get
         the relevant packages"""
         try:
@@ -545,26 +544,40 @@ class RecommendationTask:
                     '_audit': audit,
                     '_release': 'None:None:None'
                 }
-
-                wr = WorkerResult(
-                    worker='recommendation_v2',
-                    worker_id=None,
-                    external_request_id=external_request_id,
-                    analysis_id=None,
-                    task_result=task_result,
-                    error=False
-                )
-
-                # Store the result in RDS
                 try:
-                    session.add(wr)
-                    session.commit()
+                    result = session.query(WorkerResult).filter_by(
+                        external_request_id=external_request_id,
+                        worker='recommendation_v2'
+                    ).first()
                 except SQLAlchemyError as e:
-                    session.rollback()
                     return {
-                        'recommendation': 'database error',
+                        'recommendation': 'failure',
                         'external_request_id': external_request_id,
-                        'message': '%s' % e}
+                        'message': '%s' % e
+                    }
+                if result:
+                    result.task_result = task_result
+                    session.commit()
+                    return {'recommendation': 'success', 'external_request_id': external_request_id}
+                else:
+                    wr = WorkerResult(
+                        worker='recommendation_v2',
+                        worker_id=None,
+                        external_request_id=external_request_id,
+                        analysis_id=None,
+                        task_result=task_result,
+                        error=False
+                    )
+                    # Store the result in RDS
+                    try:
+                        session.add(wr)
+                        session.commit()
+                    except SQLAlchemyError as e:
+                        session.rollback()
+                        return {
+                            'recommendation': 'insert in database error',
+                            'external_request_id': external_request_id,
+                            'message': '%s' % e}
             else:
                 return {
                     'recommendation': 'pgm_error',

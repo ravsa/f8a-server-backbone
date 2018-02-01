@@ -389,7 +389,7 @@ class StackAggregator:
             finished = get_dependency_data(resolved, ecosystem)
             if finished is not None:
                 stack_data.append(aggregate_stack_data(finished, manifest, ecosystem.lower(),
-                                  resolved, manifest_file_path))
+                                                       resolved, manifest_file_path))
 
         ended_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")
         audit = {
@@ -402,26 +402,41 @@ class StackAggregator:
             '_audit': audit,
             '_release': 'None:None:None'
         }
-
-        wr = WorkerResult(
-            worker='stack_aggregator_v2',
-            worker_id=None,
-            external_request_id=external_request_id,
-            analysis_id=None,
-            task_result=stack_data,
-            error=False
-        )
-
-        # Store the result in RDS
         try:
-            session.add(wr)
-            session.commit()
+            result = session.query(WorkerResult).filter_by(
+                external_request_id=external_request_id,
+                worker='stack_aggregator_v2'
+            ).first()
         except SQLAlchemyError as e:
-            session.rollback()
             return {
-                'stack_aggregator': 'database error',
+                'recommendation': 'failure',
                 'external_request_id': external_request_id,
                 'message': '%s' % e
             }
+        if result:
+            result.task_result = stack_data
+            session.commit()
+            return {'stack_aggregator': 'success', 'external_request_id': external_request_id}
+        else:
+            wr = WorkerResult(
+                worker='stack_aggregator_v2',
+                worker_id=None,
+                external_request_id=external_request_id,
+                analysis_id=None,
+                task_result=stack_data,
+                error=False
+            )
+
+            # Store the result in RDS
+            try:
+                session.add(wr)
+                session.commit()
+            except SQLAlchemyError as e:
+                session.rollback()
+                return {
+                    'stack_aggregator': 'database error',
+                    'external_request_id': external_request_id,
+                    'message': '%s' % e
+                }
 
         return {'stack_aggregator': 'success', 'external_request_id': external_request_id}
